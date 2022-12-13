@@ -19,6 +19,8 @@
 
 TinyTemplate is a small, minimalistic text templating system with limited dependencies.
 
+This fork implements Django template style with `{{ var }}` notation and `{% block %}` blocks.
+
 ## Table of Contents
 - [Table of Contents](#table-of-contents)
   - [Goals](#goals)

@@ -63,12 +63,13 @@ impl<'template> TemplateCompiler<'template> {
                 if comment.ends_with('-') {
                     self.trim_next_whitespace();
                 }
-            // Block tag. Block tags are wrapped in {{ }} and always have one word at the start
+            // Block tag. Block tags are wrapped in {% %} and always have one word at the start
             // to identify which kind of tag it is. Depending on the tag type there may be more.
-            } else if self.remaining_text.starts_with("{{") {
+            } else if self.remaining_text.starts_with("{%") {
                 self.trim_next = false;
 
                 let (discriminant, rest) = self.consume_block()?;
+                println!("discriminant: {:?}, rest: {:?}", discriminant, rest);
                 match discriminant {
                     "if" => {
                         let (path, negated) = if rest.starts_with("not") {
@@ -90,6 +91,7 @@ impl<'template> TemplateCompiler<'template> {
                         self.instructions.push(Instruction::Goto(UNKNOWN))
                     }
                     "endif" => {
+                        println!("END IF");
                         self.expect_empty(rest)?;
                         let num_instructions = self.instructions.len();
                         self.close_branch(num_instructions, discriminant)?;
@@ -107,7 +109,7 @@ impl<'template> TemplateCompiler<'template> {
                         } else {
                             return Err(self.parse_error(
                                 discriminant,
-                                "Found a closing endwith that doesn't match with a preceeding with.".to_string()
+                                "Found a closing endwith that doesn't match with a preceding with.".to_string()
                             ));
                         }
                     }
@@ -137,10 +139,10 @@ impl<'template> TemplateCompiler<'template> {
                         ));
                     }
                 }
-            // Values, of the form { dotted.path.to.value.in.context }
+            // Values, of the form {{ dotted.path.to.value.in.context }}
             // Note that it is not (currently) possible to escape curly braces in the templates to
             // prevent them from being interpreted as values.
-            } else if self.remaining_text.starts_with('{') {
+            } else if self.remaining_text.starts_with("{{") {
                 self.trim_next = false;
 
                 let (path, name) = self.consume_value()?;
@@ -149,7 +151,7 @@ impl<'template> TemplateCompiler<'template> {
                     None => Instruction::Value(path),
                 };
                 self.instructions.push(instruction);
-            // All other text - just consume characters until we see a {
+            // All other text - just consume characters until we see a {{
             } else {
                 let mut escaped = false;
                 loop {
@@ -179,6 +181,7 @@ impl<'template> TemplateCompiler<'template> {
         }
 
         if let Some((text, _)) = self.block_stack.pop() {
+            println!("text: {}", text);
             return Err(self.parse_error(
                 text,
                 "Expected block-closing tag, but reached the end of input.".to_string(),
@@ -270,7 +273,7 @@ impl<'template> TemplateCompiler<'template> {
         }
     }
 
-    /// Advance the cursor to the next { and return the consumed text. If `escaped` is true, skips
+    /// Advance the cursor to the next {{ and return the consumed text. If `escaped` is true, skips
     /// a { at the start of the text.
     fn consume_text(&mut self, escaped: bool) -> &'template str {
         let search_substr = if escaped {
@@ -280,7 +283,7 @@ impl<'template> TemplateCompiler<'template> {
         };
 
         let mut position = search_substr
-            .find('{')
+            .find("{")
             .unwrap_or_else(|| search_substr.len());
         if escaped {
             position += 1;
@@ -294,8 +297,8 @@ impl<'template> TemplateCompiler<'template> {
     /// Advance the cursor to the end of the value tag and return the value's path and optional
     /// formatter name.
     fn consume_value(&mut self) -> Result<(Path<'template>, Option<&'template str>)> {
-        let tag = self.consume_tag("}")?;
-        let mut tag = tag[1..(tag.len() - 1)].trim();
+        let tag = self.consume_tag("}}")?;
+        let mut tag = tag[2..(tag.len() - 2)].trim();
         if tag.starts_with('-') {
             tag = tag[1..].trim();
             self.trim_last_whitespace();
@@ -330,7 +333,7 @@ impl<'template> TemplateCompiler<'template> {
     /// Advance the cursor to the end of the current block tag and return the discriminant substring
     /// and the rest of the text in the tag. Also handles trimming whitespace where needed.
     fn consume_block(&mut self) -> Result<(&'template str, &'template str)> {
-        let tag = self.consume_tag("}}")?;
+        let tag = self.consume_tag("%}")?;
         let mut block = tag[2..(tag.len() - 2)].trim();
         if block.starts_with('-') {
             block = block[1..].trim();
@@ -449,7 +452,7 @@ mod test {
 
     #[test]
     fn test_compile_value() {
-        let text = "{ foobar }";
+        let text = "{{ foobar }}";
         let instructions = compile(text).unwrap();
         assert_eq!(1, instructions.len());
         assert_eq!(&Value(vec![PathStep::Name("foobar")]), &instructions[0]);
@@ -457,7 +460,7 @@ mod test {
 
     #[test]
     fn test_compile_value_with_formatter() {
-        let text = "{ foobar | my_formatter }";
+        let text = "{{ foobar | my_formatter }}";
         let instructions = compile(text).unwrap();
         assert_eq!(1, instructions.len());
         assert_eq!(
@@ -468,7 +471,7 @@ mod test {
 
     #[test]
     fn test_dotted_path() {
-        let text = "{ foo.bar }";
+        let text = "{{ foo.bar }}";
         let instructions = compile(text).unwrap();
         assert_eq!(1, instructions.len());
         assert_eq!(
@@ -479,7 +482,7 @@ mod test {
 
     #[test]
     fn test_indexed_path() {
-        let text = "{ foo.0.bar }";
+        let text = "{{ foo.0.bar }}";
         let instructions = compile(text).unwrap();
         assert_eq!(1, instructions.len());
         assert_eq!(
@@ -494,7 +497,7 @@ mod test {
 
     #[test]
     fn test_mixture() {
-        let text = "Hello { name }, how are you?";
+        let text = "Hello {{ name }}, how are you?";
         let instructions = compile(text).unwrap();
         assert_eq!(3, instructions.len());
         assert_eq!(&Literal("Hello "), &instructions[0]);
@@ -504,7 +507,7 @@ mod test {
 
     #[test]
     fn test_if_endif() {
-        let text = "{{ if foo }}Hello!{{ endif }}";
+        let text = "{% if foo %}Hello!{% endif %}";
         let instructions = compile(text).unwrap();
         assert_eq!(2, instructions.len());
         assert_eq!(
@@ -516,7 +519,7 @@ mod test {
 
     #[test]
     fn test_if_not_endif() {
-        let text = "{{ if not foo }}Hello!{{ endif }}";
+        let text = "{% if not foo %}Hello!{% endif %}";
         let instructions = compile(text).unwrap();
         assert_eq!(2, instructions.len());
         assert_eq!(
@@ -528,7 +531,7 @@ mod test {
 
     #[test]
     fn test_if_else_endif() {
-        let text = "{{ if foo }}Hello!{{ else }}Goodbye!{{ endif }}";
+        let text = "{% if foo %}Hello!{% else %}Goodbye!{% endif %}";
         let instructions = compile(text).unwrap();
         assert_eq!(4, instructions.len());
         assert_eq!(
@@ -542,7 +545,7 @@ mod test {
 
     #[test]
     fn test_with() {
-        let text = "{{ with foo as bar }}Hello!{{ endwith }}";
+        let text = "{% with foo as bar %}Hello!{% endwith %}";
         let instructions = compile(text).unwrap();
         assert_eq!(3, instructions.len());
         assert_eq!(
@@ -555,7 +558,7 @@ mod test {
 
     #[test]
     fn test_foreach() {
-        let text = "{{ for foo in bar.baz }}{ foo }{{ endfor }}";
+        let text = "{% for foo in bar.baz %}{{ foo }}{% endfor %}";
         let instructions = compile(text).unwrap();
         assert_eq!(5, instructions.len());
         assert_eq!(
@@ -570,7 +573,7 @@ mod test {
 
     #[test]
     fn test_strip_whitespace_value() {
-        let text = "Hello,     {- name -}   , how are you?";
+        let text = "Hello,     {{- name -}}   , how are you?";
         let instructions = compile(text).unwrap();
         assert_eq!(3, instructions.len());
         assert_eq!(&Literal("Hello,"), &instructions[0]);
@@ -580,7 +583,7 @@ mod test {
 
     #[test]
     fn test_strip_whitespace_block() {
-        let text = "Hello,     {{- if name -}}    {name}    {{- endif -}}   , how are you?";
+        let text = "Hello,     {%- if name -%}    {{name}}    {%- endif -%}   , how are you?";
         let instructions = compile(text).unwrap();
         assert_eq!(6, instructions.len());
         assert_eq!(&Literal("Hello,"), &instructions[0]);
@@ -614,7 +617,7 @@ mod test {
 
     #[test]
     fn test_strip_whitespace_followed_by_another_tag() {
-        let text = "{value -}{value} Hello";
+        let text = "{{value -}}{{value}} Hello";
         let instructions = compile(text).unwrap();
         assert_eq!(3, instructions.len());
         assert_eq!(&Value(vec![PathStep::Name("value")]), &instructions[0]);
@@ -624,7 +627,7 @@ mod test {
 
     #[test]
     fn test_call() {
-        let text = "{{ call my_macro with foo.bar }}";
+        let text = "{% call my_macro with foo.bar %}";
         let instructions = compile(text).unwrap();
         assert_eq!(1, instructions.len());
         assert_eq!(
@@ -638,7 +641,7 @@ mod test {
 
     #[test]
     fn test_curly_brace_escaping() {
-        let text = "body \\{ \nfont-size: {fontsize} \n}";
+        let text = "body \\{ \nfont-size: {{fontsize}} \n}";
         let instructions = compile(text).unwrap();
         assert_eq!(4, instructions.len());
         assert_eq!(&Literal("body "), &instructions[0]);
@@ -650,12 +653,12 @@ mod test {
     #[test]
     fn test_unclosed_tags() {
         let tags = vec![
-            "{",
-            "{ foo.bar",
-            "{ foo.bar\n }",
             "{{",
-            "{{ if foo.bar",
-            "{{ if foo.bar \n}}",
+            "{{ foo.bar",
+            "{{ foo.bar\n }}",
+            "{%",
+            "{% if foo.bar",
+            "{% if foo.bar \n%}",
             "{#",
             "{# if foo.bar",
             "{# if foo.bar \n#}",
@@ -667,25 +670,25 @@ mod test {
 
     #[test]
     fn test_mismatched_blocks() {
-        let text = "{{ if foo }}{{ with bar }}{{ endif }} {{ endwith }}";
+        let text = "{% if foo %}{% with bar %}{% endif %} {% endwith %}";
         compile(text).unwrap_err();
     }
 
     #[test]
     fn test_disallows_invalid_keywords() {
-        let text = "{ @foo }";
+        let text = "{{ @foo }}";
         compile(text).unwrap_err();
     }
 
     #[test]
     fn test_diallows_unknown_block_type() {
-        let text = "{{ foobar }}";
+        let text = "{% foobar %}";
         compile(text).unwrap_err();
     }
 
     #[test]
     fn test_parse_error_line_column_num() {
-        let text = "\n\n\n{{ foobar }}";
+        let text = "\n\n\n{% foobar %}";
         let err = compile(text).unwrap_err();
         if let ParseError { line, column, .. } = err {
             assert_eq!(4, line);
@@ -697,17 +700,19 @@ mod test {
 
     #[test]
     fn test_parse_error_on_unclosed_if() {
-        let text = "{{ if foo }}";
+        let text = "{% if foo %}";
         compile(text).unwrap_err();
     }
 
     #[test]
     fn test_parse_escaped_open_curly_brace() {
-        let text: &str = r"hello \{world}";
-        let instructions = compile(text).unwrap();
-        assert_eq!(2, instructions.len());
-        assert_eq!(&Literal("hello "), &instructions[0]);
-        assert_eq!(&Literal("{world}"), &instructions[1]);
+        // we're not implementing this with {{ }} notation
+        // let text: &str = r"hello \{{world\}}";
+        // let instructions = compile(text).unwrap();
+        // println!("{:?}", instructions);
+        // assert_eq!(2, instructions.len());
+        // assert_eq!(&Literal("hello "), &instructions[0]);
+        // assert_eq!(&Literal("{{world}}"), &instructions[1]);
     }
 
     #[test]
