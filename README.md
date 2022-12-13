@@ -81,7 +81,7 @@ struct Context {
     name: String,
 }
 
-static TEMPLATE : &'static str = "Hello {name}!";
+static TEMPLATE : &'static str = "Hello {{name}}!";
 
 pub fn main() -> Result<(), Box<dyn Error>> {
     let mut tt = TinyTemplate::new();
@@ -115,7 +115,7 @@ specific patch version of TinyTemplate.
 Thanks for your interest! Contributions are welcome.
 
 Issues, feature requests, questions and bug reports should be reported via the issue tracker above.
-In particular, becuase TinyTemplate aims to be well-documented, please report anything you find
+In particular, because TinyTemplate aims to be well-documented, please report anything you find
 confusing or incorrect in the documentation.
 
 Code or documentation improvements in the form of pull requests are also welcome. Please file or
